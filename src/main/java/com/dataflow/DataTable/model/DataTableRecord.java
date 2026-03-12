@@ -1,28 +1,24 @@
 package com.dataflow.DataTable.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
-import java.time.LocalDateTime;
 import java.util.Map;
 
 @Document("data_table_records")
-public class DataTableRecord {
+@JsonInclude(JsonInclude.Include.NON_NULL)
+public class DataTableRecord extends AuditMetaData {
 
     @Id
     private String id;
-
     private String tableId;
     private Map<String, Object> data;
     @JsonIgnore
     private String searchText;
-    private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
     private Map<String, Object> metadata;
 
     public DataTableRecord() {
-        this.createdAt = LocalDateTime.now();
-        this.updatedAt = LocalDateTime.now();
     }
 
     public DataTableRecord(String tableId, Map<String, Object> data) {
@@ -54,7 +50,6 @@ public class DataTableRecord {
 
     public void setData(Map<String, Object> data) {
         this.data = data;
-        this.updatedAt = LocalDateTime.now();
     }
 
     public String getSearchText() {
@@ -65,21 +60,6 @@ public class DataTableRecord {
         this.searchText = searchText;
     }
 
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(LocalDateTime updatedAt) {
-        this.updatedAt = updatedAt;
-    }
 
     public Map<String, Object> getMetadata() {
         return metadata;

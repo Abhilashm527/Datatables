@@ -14,14 +14,17 @@ public class ConversationalAiService {
 
     private final GeminiClient geminiClient;
     private final DataTableService dataTableService;
+    private final RecordService recordService;
     private final ObjectMapper objectMapper;
     private static final int MAX_ITERATIONS = 5; // Prevent infinite loops
 
     public ConversationalAiService(GeminiClient geminiClient,
             DataTableService dataTableService,
+            RecordService recordService,
             ObjectMapper objectMapper) {
         this.geminiClient = geminiClient;
         this.dataTableService = dataTableService;
+        this.recordService = recordService;
         this.objectMapper = objectMapper;
     }
 
@@ -249,7 +252,6 @@ public class ConversationalAiService {
         }
     }
 
-    @SuppressWarnings("unchecked")
     private Object executeAction(String action, Map<String, Object> parameters) {
         try {
             return switch (action) {
@@ -369,13 +371,13 @@ public class ConversationalAiService {
         String tableName = (String) parameters.get("tableName");
         String tableId = resolveTableId(tableName);
         Map<String, Object> data = (Map<String, Object>) parameters.get("data");
-        var record = dataTableService.insertRecord(tableId, data);
+        var record = recordService.insertRecord(tableId, data);
         return Map.of("success", true, "recordId", record.getId(), "message", "Record inserted successfully");
     }
 
     private Object getRecord(Map<String, Object> parameters) {
         String recordId = (String) parameters.get("recordId");
-        var record = dataTableService.getRecord(recordId);
+        var record = recordService.getRecord(recordId);
         return record.map(r -> Map.of("success", true, "record", r))
                 .orElse(Map.of("success", false, "error", "Record not found"));
     }
@@ -384,13 +386,13 @@ public class ConversationalAiService {
     private Object updateRecord(Map<String, Object> parameters) {
         String recordId = (String) parameters.get("recordId");
         Map<String, Object> data = (Map<String, Object>) parameters.get("data");
-        var updatedRecord = dataTableService.updateRecord(recordId, data);
+        var updatedRecord = recordService.updateRecord(recordId, data);
         return Map.of("success", true, "recordId", updatedRecord.getId(), "message", "Record updated successfully");
     }
 
     private Object deleteRecord(Map<String, Object> parameters) {
         String recordId = (String) parameters.get("recordId");
-        dataTableService.deleteRecord(recordId);
+        recordService.deleteRecord(recordId);
         return Map.of("success", true, "message", "Record deleted successfully");
     }
 
@@ -398,7 +400,7 @@ public class ConversationalAiService {
         String tableName = (String) parameters.get("tableName");
         String tableId = resolveTableId(tableName);
         String query = (String) parameters.get("query");
-        var records = dataTableService.searchRecords(tableId, query);
+        var records = recordService.searchRecords(tableId, query);
         return Map.of("success", true, "count", records.size(), "records", records);
     }
 
@@ -407,7 +409,7 @@ public class ConversationalAiService {
         String tableId = resolveTableId(tableName);
         String field = (String) parameters.get("field");
         Object value = parameters.get("value");
-        var records = dataTableService.searchRecords(tableId, field, value);
+        var records = recordService.searchRecords(tableId, field, value);
         return Map.of("success", true, "count", records.size(), "records", records);
     }
 
@@ -431,14 +433,14 @@ public class ConversationalAiService {
     @SuppressWarnings("unchecked")
     private Object deleteRecords(Map<String, Object> parameters) {
         List<String> recordIds = (List<String>) parameters.get("recordIds");
-        dataTableService.deleteRecords(recordIds);
+        recordService.deleteRecords(recordIds);
         return Map.of("success", true, "deletedCount", recordIds.size(), "message", "Records deleted successfully");
     }
 
     private Object getRecordCount(Map<String, Object> parameters) {
         String tableName = (String) parameters.get("tableName");
         String tableId = resolveTableId(tableName);
-        long count = dataTableService.getRecordCount(tableId);
+        long count = recordService.getRecordCount(tableId);
         return Map.of("success", true, "count", count);
     }
 }

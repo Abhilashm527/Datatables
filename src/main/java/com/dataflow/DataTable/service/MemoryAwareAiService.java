@@ -18,6 +18,7 @@ public class MemoryAwareAiService {
 
   private final GeminiClient geminiClient;
   private final DataTableService dataTableService;
+  private final RecordService recordService;
   private final AiTrainingDataService trainingDataService;
   private final AiConversationRepository conversationRepository;
   private final ObjectMapper objectMapper;
@@ -25,11 +26,13 @@ public class MemoryAwareAiService {
   public MemoryAwareAiService(
       GeminiClient geminiClient,
       DataTableService dataTableService,
+      RecordService recordService,
       AiTrainingDataService trainingDataService,
       AiConversationRepository conversationRepository,
       ObjectMapper objectMapper) {
     this.geminiClient = geminiClient;
     this.dataTableService = dataTableService;
+    this.recordService = recordService;
     this.trainingDataService = trainingDataService;
     this.conversationRepository = conversationRepository;
     this.objectMapper = objectMapper;
@@ -400,7 +403,7 @@ public class MemoryAwareAiService {
     String tableName = (String) parameters.get("tableName");
     String tableId = resolveTableId(tableName);
     Map<String, Object> data = (Map<String, Object>) parameters.get("records");
-    var record = dataTableService.insertRecord(tableId, data);
+    var record = recordService.insertRecord(tableId, data);
     return Map.of("success", true, "recordId", record.getId(), "message", "Record inserted successfully");
   }
 
@@ -409,13 +412,13 @@ public class MemoryAwareAiService {
     String tableName = (String) parameters.get("tableName");
     String tableId = resolveTableId(tableName);
     List<Map<String, Object>> records = (List<Map<String, Object>>) parameters.get("records");
-    var createdRecords = dataTableService.insertRecords(tableId, records);
+    var createdRecords = recordService.insertRecords(tableId, records);
     return Map.of("success", true, "count", createdRecords.size(), "message", "Records inserted successfully");
   }
 
   private Object getRecord(Map<String, Object> parameters) {
     String recordId = (String) parameters.get("recordId");
-    var record = dataTableService.getRecord(recordId);
+    var record = recordService.getRecord(recordId);
     return record.map(r -> Map.of("success", true, "record", r))
         .orElse(Map.of("success", false, "error", "Record not found"));
   }
@@ -424,13 +427,13 @@ public class MemoryAwareAiService {
   private Object updateRecord(Map<String, Object> parameters) {
     String recordId = (String) parameters.get("recordId");
     Map<String, Object> data = (Map<String, Object>) parameters.get("data");
-    var updatedRecord = dataTableService.updateRecord(recordId, data);
+    var updatedRecord = recordService.updateRecord(recordId, data);
     return Map.of("success", true, "recordId", updatedRecord.getId(), "message", "Record updated successfully");
   }
 
   private Object deleteRecord(Map<String, Object> parameters) {
     String recordId = (String) parameters.get("recordId");
-    dataTableService.deleteRecord(recordId);
+    recordService.deleteRecord(recordId);
     return Map.of("success", true, "message", "Record deleted successfully");
   }
 
@@ -438,7 +441,7 @@ public class MemoryAwareAiService {
     String tableName = (String) parameters.get("tableName");
     String tableId = resolveTableId(tableName);
     String query = (String) parameters.get("query");
-    var records = dataTableService.searchRecords(tableId, query);
+    var records = recordService.searchRecords(tableId, query);
     return Map.of("success", true, "count", records.size(), "records", records);
   }
 
@@ -447,7 +450,7 @@ public class MemoryAwareAiService {
     String tableId = resolveTableId(tableName);
     String field = (String) parameters.get("field");
     Object value = parameters.get("value");
-    var records = dataTableService.searchRecords(tableId, field, value);
+    var records = recordService.searchRecords(tableId, field, value);
     return Map.of("success", true, "count", records.size(), "records", records);
   }
 
@@ -471,14 +474,14 @@ public class MemoryAwareAiService {
   @SuppressWarnings("unchecked")
   private Object deleteRecords(Map<String, Object> parameters) {
     List<String> recordIds = (List<String>) parameters.get("recordIds");
-    dataTableService.deleteRecords(recordIds);
+    recordService.deleteRecords(recordIds);
     return Map.of("success", true, "deletedCount", recordIds.size(), "message", "Records deleted successfully");
   }
 
   private Object getRecordCount(Map<String, Object> parameters) {
     String tableName = (String) parameters.get("tableName");
     String tableId = resolveTableId(tableName);
-    long count = dataTableService.getRecordCount(tableId);
+    long count = recordService.getRecordCount(tableId);
     return Map.of("success", true, "count", count);
   }
 }

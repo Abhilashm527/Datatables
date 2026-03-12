@@ -14,13 +14,16 @@ import java.util.stream.Collectors;
 public class AiTrainingDataService {
 
     private final DataTableService dataTableService;
+    private final RecordService recordService;
     private final AiTrainingDataRepository trainingDataRepository;
     private final ObjectMapper objectMapper;
 
     public AiTrainingDataService(DataTableService dataTableService,
+            RecordService recordService,
             AiTrainingDataRepository trainingDataRepository,
             ObjectMapper objectMapper) {
         this.dataTableService = dataTableService;
+        this.recordService = recordService;
         this.trainingDataRepository = trainingDataRepository;
         this.objectMapper = objectMapper;
     }
@@ -49,9 +52,8 @@ public class AiTrainingDataService {
                         .append(table.getDescription() != null ? table.getDescription() : "N/A")
                         .append("\n");
 
-                // Record count
                 try {
-                    long count = dataTableService.getRecordCount(table.getId());
+                    long count = recordService.getRecordCount(table.getId());
                     context.append("  Record Count: ").append(count).append("\n");
                 } catch (Exception e) {
                     context.append("  Record Count: Unable to fetch\n");

@@ -1,27 +1,24 @@
 package com.dataflow.DataTable.model;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
 @Document(collection = "data_table_schemas")
-public class DataTableSchema {
+@JsonInclude(JsonInclude.Include.NON_NULL)
+public class DataTableSchema extends AuditMetaData {
 
     @Id
     private String id;
-
+    private String applicationId;
     private String tableName;
     private String description;
     private List<ColumnDefinition> columns;
-    private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
     private Map<String, Object> metadata;
 
     public DataTableSchema() {
-        this.createdAt = LocalDateTime.now();
-        this.updatedAt = LocalDateTime.now();
     }
 
     public DataTableSchema(String tableName, String description, List<ColumnDefinition> columns) {
@@ -62,24 +59,16 @@ public class DataTableSchema {
 
     public void setColumns(List<ColumnDefinition> columns) {
         this.columns = columns;
-        this.updatedAt = LocalDateTime.now();
     }
 
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
+    public String getApplicationId() {
+        return applicationId;
     }
 
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
+    public void setApplicationId(String applicationId) {
+        this.applicationId = applicationId;
     }
 
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(LocalDateTime updatedAt) {
-        this.updatedAt = updatedAt;
-    }
 
     public Map<String, Object> getMetadata() {
         return metadata;

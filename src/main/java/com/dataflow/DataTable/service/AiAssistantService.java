@@ -17,11 +17,13 @@ public class AiAssistantService {
 
     private final GeminiClient geminiClient;
     private final DataTableService dataTableService;
+    private final RecordService recordService;
     private final ObjectMapper objectMapper;
 
-    public AiAssistantService(GeminiClient geminiClient, DataTableService dataTableService) {
+    public AiAssistantService(GeminiClient geminiClient, DataTableService dataTableService, RecordService recordService) {
         this.geminiClient = geminiClient;
         this.dataTableService = dataTableService;
+        this.recordService = recordService;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -420,7 +422,7 @@ public class AiAssistantService {
             String tableId = resolveTableId(tableName);
             Map<String, Object> data = (Map<String, Object>) parameters.get("data");
 
-            var record = dataTableService.insertRecord(tableId, data);
+            var record = recordService.insertRecord(tableId, data);
             return Map.of(
                     "success", true,
                     "recordId", record.getId(),
@@ -433,7 +435,7 @@ public class AiAssistantService {
     private Object getRecord(Map<String, Object> parameters) {
         try {
             String recordId = (String) parameters.get("recordId");
-            var record = dataTableService.getRecord(recordId);
+            var record = recordService.getRecord(recordId);
 
             if (record.isPresent()) {
                 return Map.of(
@@ -453,7 +455,7 @@ public class AiAssistantService {
             String recordId = (String) parameters.get("recordId");
             Map<String, Object> data = (Map<String, Object>) parameters.get("data");
 
-            var updatedRecord = dataTableService.updateRecord(recordId, data);
+            var updatedRecord = recordService.updateRecord(recordId, data);
             return Map.of(
                     "success", true,
                     "recordId", updatedRecord.getId(),
@@ -466,7 +468,7 @@ public class AiAssistantService {
     private Object deleteRecord(Map<String, Object> parameters) {
         try {
             String recordId = (String) parameters.get("recordId");
-            dataTableService.deleteRecord(recordId);
+            recordService.deleteRecord(recordId);
             return Map.of(
                     "success", true,
                     "message", "Record deleted successfully");
@@ -481,7 +483,7 @@ public class AiAssistantService {
             String tableId = resolveTableId(tableName);
             String query = (String) parameters.get("query");
 
-            var records = dataTableService.searchRecords(tableId, query);
+            var records = recordService.searchRecords(tableId, query);
             return Map.of(
                     "success", true,
                     "count", records.size(),
@@ -498,7 +500,7 @@ public class AiAssistantService {
             String field = (String) parameters.get("field");
             Object value = parameters.get("value");
 
-            var records = dataTableService.searchRecords(tableId, field, value);
+            var records = recordService.searchRecords(tableId, field, value);
             return Map.of(
                     "success", true,
                     "count", records.size(),
@@ -545,7 +547,7 @@ public class AiAssistantService {
     private Object deleteRecords(Map<String, Object> parameters) {
         try {
             List<String> recordIds = (List<String>) parameters.get("recordIds");
-            dataTableService.deleteRecords(recordIds);
+            recordService.deleteRecords(recordIds);
             return Map.of(
                     "success", true,
                     "deletedCount", recordIds.size(),
@@ -560,7 +562,7 @@ public class AiAssistantService {
             String tableName = (String) parameters.get("tableName");
             String tableId = resolveTableId(tableName);
 
-            long count = dataTableService.getRecordCount(tableId);
+            long count = recordService.getRecordCount(tableId);
             return Map.of(
                     "success", true,
                     "count", count);

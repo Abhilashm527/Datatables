@@ -1,7 +1,8 @@
 package com.dataflow.DataTable.controller;
 
 import com.dataflow.DataTable.model.DataTableRecord;
-import com.dataflow.DataTable.service.DataTableService;
+import com.dataflow.DataTable.service.RecordService;
+import com.dataflow.DataTable.util.Response;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -15,38 +16,42 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static com.dataflow.DataTable.config.APIConstants.RECORD_BASE_PATH;
+
 @RestController
-@RequestMapping("/api/datatables")
+@RequestMapping(RECORD_BASE_PATH)
 @CrossOrigin(origins = "*")
 public class RecordController {
 
     @Autowired
-    private DataTableService dataTableService;
+    private RecordService recordService;
 
-    @PostMapping("/tables/{tableId}/records")
-    public ResponseEntity<DataTableRecord> insertRecord(@PathVariable String tableId,
+    @PostMapping("/table/{tableId}")
+    public ResponseEntity<Response> insertRecord(
+            @PathVariable String tableId,
             @RequestBody Map<String, Object> data) {
         try {
-            DataTableRecord record = dataTableService.insertRecord(tableId, data);
-            return ResponseEntity.status(HttpStatus.CREATED).body(record);
+            DataTableRecord record = recordService.insertRecord(tableId, data);
+            return Response.createResponse(record);
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(null);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Response.builder().code(400).message(e.getMessage()).build());
         }
     }
 
-    @PostMapping("/tables/{tableId}/records/batch")
-    public ResponseEntity<List<DataTableRecord>> insertRecords(@PathVariable String tableId,
+    @PostMapping("/{tableId}/batch")
+    public ResponseEntity<Response> insertRecords(
+            @PathVariable String tableId,
             @RequestBody List<Map<String, Object>> records) {
         try {
-            List<DataTableRecord> createdRecords = dataTableService.insertRecords(tableId, records);
-            return ResponseEntity.status(HttpStatus.CREATED).body(createdRecords);
+            List<DataTableRecord> createdRecords = recordService.insertRecords(tableId, records);
+            return Response.createResponse(createdRecords);
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(null);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Response.builder().code(400).message(e.getMessage()).build());
         }
     }
 
-    @GetMapping("/tables/{tableId}/records")
-    public ResponseEntity<Page<DataTableRecord>> getRecords(
+    @GetMapping("/table/{tableId}")
+    public ResponseEntity<Response> getRecords(
             @PathVariable String tableId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
@@ -56,67 +61,52 @@ public class RecordController {
         Sort.Direction direction = sortDir.equalsIgnoreCase("desc") ? Sort.Direction.DESC : Sort.Direction.ASC;
         Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortBy));
 
-        Page<DataTableRecord> records = dataTableService.getRecords(tableId, pageable);
-        return ResponseEntity.ok(records);
+        Page<DataTableRecord> records = recordService.getRecords(tableId, pageable);
+        return Response.getResponse(records);
     }
 
-    @GetMapping("/tables/{tableId}/records/all")
-    public ResponseEntity<Page<DataTableRecord>> getAllRecords(
-            @PathVariable String tableId,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size,
-            @RequestParam(defaultValue = "createdAt") String sortBy,
-            @RequestParam(defaultValue = "desc") String sortDir) {
-
-        Sort.Direction direction = sortDir.equalsIgnoreCase("desc") ? Sort.Direction.DESC : Sort.Direction.ASC;
-        Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortBy));
-
-        Page<DataTableRecord> records = dataTableService.getRecords(tableId, pageable);
-        return ResponseEntity.ok(records);
+    @GetMapping("/{recordId}")
+    public ResponseEntity<Response> getRecord(@PathVariable String recordId) {
+        Optional<DataTableRecord> record = recordService.getRecord(recordId);
+        return record.map(Response::getResponse)
+                .orElse(ResponseEntity.status(HttpStatus.NOT_FOUND).body(Response.builder().code(404).message("Record not found").build()));
     }
 
-    @GetMapping("/records/{recordId}")
-    public ResponseEntity<DataTableRecord> getRecord(@PathVariable String recordId) {
-        Optional<DataTableRecord> record = dataTableService.getRecord(recordId);
-        return record.map(ResponseEntity::ok)
-                .orElse(ResponseEntity.notFound().build());
-    }
-
-    @PutMapping("/records/{recordId}")
-    public ResponseEntity<DataTableRecord> updateRecord(@PathVariable String recordId,
+    @PutMapping("/{recordId}")
+    public ResponseEntity<Response> updateRecord(@PathVariable String recordId,
             @RequestBody Map<String, Object> data) {
         try {
-            DataTableRecord updatedRecord = dataTableService.updateRecord(recordId, data);
-            return ResponseEntity.ok(updatedRecord);
+            DataTableRecord updatedRecord = recordService.updateRecord(recordId, data);
+            return Response.updateResponse(updatedRecord);
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(null);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Response.builder().code(400).message(e.getMessage()).build());
         }
     }
 
-    @DeleteMapping("/records/{recordId}")
-    public ResponseEntity<Void> deleteRecord(@PathVariable String recordId) {
+    @DeleteMapping("/{recordId}")
+    public ResponseEntity<Response> deleteRecord(@PathVariable String recordId) {
         try {
-            dataTableService.deleteRecord(recordId);
-            return ResponseEntity.noContent().build();
+            recordService.deleteRecord(recordId);
+            return ResponseEntity.status(HttpStatus.OK).body(Response.builder().code(200).message("Record deleted successfully").build());
         } catch (Exception e) {
-            return ResponseEntity.notFound().build();
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Response.builder().code(404).message(e.getMessage()).build());
         }
     }
 
-    @DeleteMapping("/records/batch")
-    public ResponseEntity<Map<String, String>> deleteRecords(@RequestBody List<String> recordIds) {
+    @DeleteMapping("/batch")
+    public ResponseEntity<Response> deleteRecords(@RequestBody List<String> recordIds) {
         try {
-            dataTableService.deleteRecords(recordIds);
-            return ResponseEntity.ok(Map.of("message", "Records deleted successfully"));
+            recordService.deleteRecords(recordIds);
+            return ResponseEntity.status(HttpStatus.OK).body(Response.builder().code(200).message("Records deleted successfully").build());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("error", "Failed to delete records: " + e.getMessage()));
+                    .body(Response.builder().code(500).message("Failed to delete records: " + e.getMessage()).build());
         }
     }
 
-    @GetMapping("/tables/{tableId}/count")
-    public ResponseEntity<Map<String, Long>> getRecordCount(@PathVariable String tableId) {
-        long count = dataTableService.getRecordCount(tableId);
-        return ResponseEntity.ok(Map.of("count", count));
+    @GetMapping("/{tableId}/count")
+    public ResponseEntity<Response> getRecordCount(@PathVariable String tableId) {
+        long count = recordService.getRecordCount(tableId);
+        return Response.getResponse(Map.of("count", count));
     }
 }

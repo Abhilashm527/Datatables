@@ -10,8 +10,10 @@ import org.springframework.web.bind.annotation.*;
 import java.util.Map;
 import java.util.UUID;
 
+import static com.dataflow.DataTable.config.APIConstants.AI_BASE_PATH;
+
 @RestController
-@RequestMapping("/ai")
+@RequestMapping(AI_BASE_PATH)
 @CrossOrigin(origins = "*")
 public class AiController {
 

@@ -10,8 +10,10 @@ import org.springframework.web.bind.annotation.*;
 import java.util.HashMap;
 import java.util.Map;
 
+import static com.dataflow.DataTable.config.APIConstants.INDEX_BASE_PATH;
+
 @RestController
-@RequestMapping("/api/indexes")
+@RequestMapping(INDEX_BASE_PATH)
 @Tag(name = "Index Management", description = "APIs for managing database indexes")
 @CrossOrigin(origins = "*")
 public class IndexController {

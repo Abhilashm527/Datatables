@@ -1,7 +1,8 @@
 package com.dataflow.DataTable.controller;
 
 import com.dataflow.DataTable.model.DataTableRecord;
-import com.dataflow.DataTable.service.DataTableService;
+import com.dataflow.DataTable.service.RecordService;
+import com.dataflow.DataTable.util.Response;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -10,16 +11,18 @@ import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import static com.dataflow.DataTable.config.APIConstants.DATATABLE_BASE_PATH;
+
 @RestController
-@RequestMapping("/api/datatables")
+@RequestMapping(DATATABLE_BASE_PATH)
 @CrossOrigin(origins = "*")
 public class SearchController {
 
     @Autowired
-    private DataTableService dataTableService;
+    private RecordService recordService;
 
-    @GetMapping("/tables/{tableId}/search")
-    public ResponseEntity<Page<DataTableRecord>> searchRecords(
+    @GetMapping("/{tableId}/search")
+    public ResponseEntity<Response> searchRecords(
             @PathVariable String tableId,
             @RequestParam String field,
             @RequestParam String value,
@@ -31,12 +34,12 @@ public class SearchController {
         Sort.Direction direction = sortDir.equalsIgnoreCase("desc") ? Sort.Direction.DESC : Sort.Direction.ASC;
         Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortBy));
 
-        Page<DataTableRecord> records = dataTableService.searchRecords(tableId, field, value, pageable);
-        return ResponseEntity.ok(records);
+        Page<DataTableRecord> records = recordService.searchRecords(tableId, field, value, pageable);
+        return Response.getResponse(records);
     }
 
-    @GetMapping("/tables/{tableId}/search/text")
-    public ResponseEntity<Page<DataTableRecord>> searchRecordsByText(
+    @GetMapping("/{tableId}/search/text")
+    public ResponseEntity<Response> searchRecordsByText(
             @PathVariable String tableId,
             @RequestParam String query,
             @RequestParam(defaultValue = "0") int page,
@@ -47,7 +50,7 @@ public class SearchController {
         Sort.Direction direction = sortDir.equalsIgnoreCase("desc") ? Sort.Direction.DESC : Sort.Direction.ASC;
         Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortBy));
 
-        Page<DataTableRecord> records = dataTableService.searchRecords(tableId, query, pageable);
-        return ResponseEntity.ok(records);
+        Page<DataTableRecord> records = recordService.searchRecords(tableId, query, pageable);
+        return Response.getResponse(records);
     }
 }
