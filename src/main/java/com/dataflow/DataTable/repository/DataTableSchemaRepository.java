@@ -11,6 +11,8 @@ public interface DataTableSchemaRepository extends MongoRepository<DataTableSche
     
     Optional<DataTableSchema> findByTableName(String tableName);
     
+    Optional<DataTableSchema> findByTableNameAndApplicationId(String tableName, String applicationId);
+    
     List<DataTableSchema> findByApplicationId(String applicationId);
     
     boolean existsByTableName(String tableName);

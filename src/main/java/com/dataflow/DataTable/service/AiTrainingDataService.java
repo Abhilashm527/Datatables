@@ -31,13 +31,15 @@ public class AiTrainingDataService {
     /**
      * Build comprehensive training data about the current database state
      */
-    public String buildDatabaseContext() {
+    public String buildDatabaseContext(String applicationId) {
         StringBuilder context = new StringBuilder();
 
         context.append("=== DYNAMIC DATABASE STATE ===\n\n");
 
-        // Get all tables
-        List<DataTableSchema> tables = dataTableService.getAllTables();
+        // Get all tables for the application
+        List<DataTableSchema> tables = applicationId != null ? 
+            dataTableService.getTablesByApplicationId(applicationId) : 
+            dataTableService.getAllTables();
 
         if (tables.isEmpty()) {
             context.append("No tables exist in the database yet.\n");
@@ -259,17 +261,23 @@ public class AiTrainingDataService {
 
     // Previous helper methods maintained or adapted...
 
-    public String buildTableContext(String tableNameOrId) {
+    public String buildTableContext(String tableNameOrId, String applicationId) {
         StringBuilder context = new StringBuilder();
         try {
             Optional<DataTableSchema> tableOpt = dataTableService.getTableById(tableNameOrId);
             if (tableOpt.isEmpty()) {
-                tableOpt = dataTableService.getTableByName(tableNameOrId);
+                tableOpt = dataTableService.getTableByName(tableNameOrId, applicationId);
             }
             if (tableOpt.isEmpty()) {
                 return "Table '" + tableNameOrId + "' not found.";
             }
             DataTableSchema table = tableOpt.get();
+            
+            // Validate application context if provided
+            if (applicationId != null && !applicationId.equals(table.getApplicationId())) {
+                return "Table '" + tableNameOrId + "' exists but does not belong to application '" + applicationId + "'.";
+            }
+
             context.append("TABLE DETAILS: ").append(table.getTableName()).append("\n");
             context.append("ID: ").append(table.getId()).append("\n");
             context.append("SCHEMA:\n");

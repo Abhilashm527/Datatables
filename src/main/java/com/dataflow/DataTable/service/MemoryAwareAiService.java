@@ -1,6 +1,7 @@
 package com.dataflow.DataTable.service;
 
 import com.dataflow.DataTable.config.GeminiClient;
+import org.springframework.data.domain.Pageable;
 import com.dataflow.DataTable.model.AiConversation;
 import com.dataflow.DataTable.model.AiConversation.ConversationMessage;
 import com.dataflow.DataTable.model.DataTableSchema;
@@ -41,10 +42,10 @@ public class MemoryAwareAiService {
   /**
    * Process a prompt with full context awareness and memory
    */
-  public Map<String, Object> processWithMemory(String userPrompt, String sessionId, String userId) {
+  public Map<String, Object> processWithMemory(String userPrompt, String sessionId, String userId, String applicationId) {
     try {
       // Get or create conversation (database record for persistence)
-      AiConversation conversation = getOrCreateConversation(sessionId, userId);
+      AiConversation conversation = getOrCreateConversation(sessionId, userId, applicationId);
 
       // Add user message to oudr persistent DB
       ConversationMessage userMessage = new ConversationMessage();
@@ -55,8 +56,8 @@ public class MemoryAwareAiService {
 
       // Build context (Database schema, etc.) - We still need this as system
       // instruction
-      String databaseContext = trainingDataService.buildDatabaseContext();
-      String systemPrompt = buildMemoryAwareSystemPrompt(databaseContext, ""); // Static prompt
+      String databaseContext = trainingDataService.buildDatabaseContext(applicationId);
+      String systemPrompt = buildMemoryAwareSystemPrompt(databaseContext, "", applicationId); // Updated signature
 
       // Get response using the Client's internal multi-turn memory
       Map<String, Object> geminiResponse = geminiClient.chat(sessionId, systemPrompt, userPrompt);
@@ -68,6 +69,11 @@ public class MemoryAwareAiService {
       String action = (String) parsedResponse.get("action");
       @SuppressWarnings("unchecked")
       Map<String, Object> parameters = (Map<String, Object>) parsedResponse.get("parameters");
+
+      // Inject applicationId into parameters for processing
+      if (applicationId != null) {
+        parameters.put("applicationId", applicationId);
+      }
 
       // Execute action
       Object result = executeAction(action, parameters);
@@ -212,24 +218,38 @@ public class MemoryAwareAiService {
     return conversationRepository.findByUserIdOrderByLastUpdatedAtDesc(userId);
   }
 
-  private AiConversation getOrCreateConversation(String sessionId, String userId) {
+  /**
+   * Get all conversations for an application
+   */
+  public List<AiConversation> getApplicationConversations(String applicationId) {
+    return conversationRepository.findByApplicationIdOrderByLastUpdatedAtDesc(applicationId);
+  }
+
+  private AiConversation getOrCreateConversation(String sessionId, String userId, String applicationId) {
     Optional<AiConversation> existing = conversationRepository.findBySessionIdAndActiveTrue(sessionId);
 
     if (existing.isPresent()) {
-      return existing.get();
+      AiConversation conv = existing.get();
+      // If applicationId is provided, update it if it's different
+      if (applicationId != null && !applicationId.equals(conv.getApplicationId())) {
+        conv.setApplicationId(applicationId);
+        conversationRepository.save(conv);
+      }
+      return conv;
     }
 
     // Create new conversation
     AiConversation conversation = new AiConversation();
     conversation.setSessionId(sessionId);
     conversation.setUserId(userId);
+    conversation.setApplicationId(applicationId);
     conversation.setContext(new HashMap<>());
     conversation.setMetadata(new HashMap<>());
 
     return conversationRepository.save(conversation);
   }
 
-  private String buildMemoryAwareSystemPrompt(String databaseContext, String conversationHistory) {
+  private String buildMemoryAwareSystemPrompt(String databaseContext, String conversationHistory, String applicationId) {
     return """
         You are an intelligent AI assistant for a DataTable management system with full memory and context awareness.
 
@@ -239,7 +259,7 @@ public class MemoryAwareAiService {
         3. All available operations
 
         """
-        + databaseContext + """
+        + databaseContext + (applicationId != null ? "\nCURRENT APPLICATION ID: " + applicationId : "") + """
 
             """ + conversationHistory + """
 
@@ -288,17 +308,19 @@ public class MemoryAwareAiService {
     try {
       JsonNode jsonNode = objectMapper.readTree(cleanedResponse);
 
-      if (!jsonNode.has("action") || jsonNode.get("action") == null) {
-        throw new RuntimeException("AI response missing 'action' field");
-      }
-
-      if (!jsonNode.has("parameters") || jsonNode.get("parameters") == null) {
-        throw new RuntimeException("AI response missing 'parameters' field");
+      if (!jsonNode.has("action") || jsonNode.get("action") == null || jsonNode.get("action").isNull()) {
+        throw new RuntimeException("AI response missing 'action' field. Response: " + cleanedResponse);
       }
 
       Map<String, Object> result = new HashMap<>();
       result.put("action", jsonNode.get("action").asText());
-      result.put("parameters", objectMapper.convertValue(jsonNode.get("parameters"), Map.class));
+
+      if (jsonNode.has("parameters") && jsonNode.get("parameters").isObject()) {
+        result.put("parameters", objectMapper.convertValue(jsonNode.get("parameters"), Map.class));
+      } else {
+        result.put("parameters", new HashMap<String, Object>());
+      }
+
       result.put("explanation", jsonNode.has("explanation") && jsonNode.get("explanation") != null
           ? jsonNode.get("explanation").asText()
           : "");
@@ -312,7 +334,7 @@ public class MemoryAwareAiService {
   private Object executeAction(String action, Map<String, Object> parameters) {
     try {
       return switch (action) {
-        case "LIST_TABLES" -> listTables();
+        case "LIST_TABLES" -> listTables(parameters);
         case "GET_TABLE" -> getTable(parameters);
         case "CREATE_TABLE" -> createTable(parameters);
         case "DELETE_TABLE" -> deleteTable(parameters);
@@ -334,29 +356,42 @@ public class MemoryAwareAiService {
     }
   }
 
-  private String resolveTableId(String tableNameOrId) {
+  private String resolveTableNameFromParams(Map<String, Object> parameters) {
+    String tableName = (String) parameters.get("tableName");
+    if (tableName != null) return tableName;
+    String tableId = (String) parameters.get("tableId");
+    if (tableId != null) {
+      return dataTableService.getTableById(tableId)
+          .map(t -> t.getTableName())
+          .orElseThrow(() -> new RuntimeException("Table not found with id: " + tableId));
+    }
+    throw new RuntimeException("tableName or tableId is required");
+  }
+
+  private String resolveTableId(String tableNameOrId, String applicationId) {
     var tableById = dataTableService.getTableById(tableNameOrId);
-    if (tableById.isPresent()) {
-      return tableById.get().getId();
-    }
-
-    var tableByName = dataTableService.getTableByName(tableNameOrId);
-    if (tableByName.isPresent()) {
-      return tableByName.get().getId();
-    }
-
-    throw new RuntimeException("Table not found: " + tableNameOrId);
+    if (tableById.isPresent()) return tableById.get().getId();
+    var tableByName = dataTableService.getTableByName(tableNameOrId, applicationId);
+    if (tableByName.isPresent()) return tableByName.get().getId();
+    throw new RuntimeException("Table not found: " + tableNameOrId + (applicationId != null ? " in application " + applicationId : ""));
   }
 
   // Action methods (simplified versions - reuse from AiAssistantService)
-  private Object listTables() {
-    var tables = dataTableService.getAllTables();
+  private Object listTables(Map<String, Object> parameters) {
+    String applicationId = (String) parameters.get("applicationId");
+    List<DataTableSchema> tables;
+    if (applicationId != null) {
+      tables = dataTableService.getTablesByApplicationId(applicationId);
+    } else {
+      tables = dataTableService.getAllTables();
+    }
     return Map.of("success", true, "count", tables.size(), "tables", tables);
   }
 
   private Object getTable(Map<String, Object> parameters) {
     String tableName = (String) parameters.get("tableName");
-    String tableId = resolveTableId(tableName);
+    String applicationId = (String) parameters.get("applicationId");
+    String tableId = resolveTableId(tableName, applicationId);
     var table = dataTableService.getTableById(tableId);
     return table.map(t -> Map.of("success", true, "table", t))
         .orElse(Map.of("success", false, "error", "Table not found"));
@@ -365,6 +400,7 @@ public class MemoryAwareAiService {
   @SuppressWarnings("unchecked")
   private Object createTable(Map<String, Object> parameters) {
     DataTableSchema schema = new DataTableSchema();
+    schema.setApplicationId((String) parameters.get("applicationId"));
     schema.setTableName((String) parameters.get("tableName"));
     schema.setDescription((String) parameters.get("description"));
 
@@ -393,70 +429,71 @@ public class MemoryAwareAiService {
 
   private Object deleteTable(Map<String, Object> parameters) {
     String tableName = (String) parameters.get("tableName");
-    String tableId = resolveTableId(tableName);
+    String applicationId = (String) parameters.get("applicationId");
+    String tableId = resolveTableId(tableName, applicationId);
     dataTableService.deleteTable(tableId);
     return Map.of("success", true, "message", "Table deleted successfully");
   }
 
   @SuppressWarnings("unchecked")
   private Object insertRecord(Map<String, Object> parameters) {
-    String tableName = (String) parameters.get("tableName");
-    String tableId = resolveTableId(tableName);
+    String tableName = resolveTableNameFromParams(parameters);
     Map<String, Object> data = (Map<String, Object>) parameters.get("records");
-    var record = recordService.insertRecord(tableId, data);
-    return Map.of("success", true, "recordId", record.getId(), "message", "Record inserted successfully");
+    var record = recordService.insertRecord(tableName, data);
+    return Map.of("success", true, "recordId", record.get("_id"), "message", "Record inserted successfully");
   }
 
   @SuppressWarnings("unchecked")
   private Object insertmultiRecords(Map<String, Object> parameters) {
-    String tableName = (String) parameters.get("tableName");
-    String tableId = resolveTableId(tableName);
+    String tableName = resolveTableNameFromParams(parameters);
     List<Map<String, Object>> records = (List<Map<String, Object>>) parameters.get("records");
-    var createdRecords = recordService.insertRecords(tableId, records);
+    var createdRecords = recordService.insertRecords(tableName, records);
     return Map.of("success", true, "count", createdRecords.size(), "message", "Records inserted successfully");
   }
 
   private Object getRecord(Map<String, Object> parameters) {
+    String tableName = resolveTableNameFromParams(parameters);
     String recordId = (String) parameters.get("recordId");
-    var record = recordService.getRecord(recordId);
+    var record = recordService.getRecord(tableName, recordId);
     return record.map(r -> Map.of("success", true, "record", r))
         .orElse(Map.of("success", false, "error", "Record not found"));
   }
 
   @SuppressWarnings("unchecked")
   private Object updateRecord(Map<String, Object> parameters) {
+    String tableName = resolveTableNameFromParams(parameters);
     String recordId = (String) parameters.get("recordId");
     Map<String, Object> data = (Map<String, Object>) parameters.get("data");
-    var updatedRecord = recordService.updateRecord(recordId, data);
-    return Map.of("success", true, "recordId", updatedRecord.getId(), "message", "Record updated successfully");
+    var updatedRecord = recordService.updateRecord(tableName, recordId, data);
+    return Map.of("success", true, "recordId", updatedRecord.get("_id"), "message", "Record updated successfully");
   }
 
   private Object deleteRecord(Map<String, Object> parameters) {
+    String tableName = resolveTableNameFromParams(parameters);
     String recordId = (String) parameters.get("recordId");
-    recordService.deleteRecord(recordId);
+    recordService.deleteRecord(tableName, recordId);
     return Map.of("success", true, "message", "Record deleted successfully");
   }
 
   private Object searchRecords(Map<String, Object> parameters) {
-    String tableName = (String) parameters.get("tableName");
-    String tableId = resolveTableId(tableName);
+    String tableName = resolveTableNameFromParams(parameters);
     String query = (String) parameters.get("query");
-    var records = recordService.searchRecords(tableId, query);
+    var records = recordService.searchRecordsByText(tableName, query, Pageable.unpaged()).getContent();
     return Map.of("success", true, "count", records.size(), "records", records);
   }
 
   private Object searchByField(Map<String, Object> parameters) {
-    String tableName = (String) parameters.get("tableName");
-    String tableId = resolveTableId(tableName);
+    String tableName = resolveTableNameFromParams(parameters);
     String field = (String) parameters.get("field");
     Object value = parameters.get("value");
-    var records = recordService.searchRecords(tableId, field, value);
+    var records = recordService.searchRecords(tableName, field, value);
     return Map.of("success", true, "count", records.size(), "records", records);
   }
 
   private Object createIndex(Map<String, Object> parameters) {
     String tableName = (String) parameters.get("tableName");
-    String tableId = resolveTableId(tableName);
+    String applicationId = (String) parameters.get("applicationId");
+    String tableId = resolveTableId(tableName, applicationId);
     String columnName = (String) parameters.get("columnName");
     boolean unique = parameters.containsKey("unique") ? (Boolean) parameters.get("unique") : false;
     String indexName = dataTableService.createIndex(tableId, columnName, unique);
@@ -465,7 +502,8 @@ public class MemoryAwareAiService {
 
   private Object dropIndex(Map<String, Object> parameters) {
     String tableName = (String) parameters.get("tableName");
-    String tableId = resolveTableId(tableName);
+    String applicationId = (String) parameters.get("applicationId");
+    String tableId = resolveTableId(tableName, applicationId);
     String columnName = (String) parameters.get("columnName");
     String indexName = dataTableService.dropIndex(tableId, columnName);
     return Map.of("success", true, "indexName", indexName, "message", "Index dropped successfully");
@@ -473,14 +511,16 @@ public class MemoryAwareAiService {
 
   @SuppressWarnings("unchecked")
   private Object deleteRecords(Map<String, Object> parameters) {
+    String tableName = (String) parameters.get("tableName");
     List<String> recordIds = (List<String>) parameters.get("recordIds");
-    recordService.deleteRecords(recordIds);
+    recordService.deleteRecords(tableName, recordIds);
     return Map.of("success", true, "deletedCount", recordIds.size(), "message", "Records deleted successfully");
   }
 
   private Object getRecordCount(Map<String, Object> parameters) {
     String tableName = (String) parameters.get("tableName");
-    String tableId = resolveTableId(tableName);
+    String applicationId = (String) parameters.get("applicationId");
+    String tableId = resolveTableId(tableName, applicationId);
     long count = recordService.getRecordCount(tableId);
     return Map.of("success", true, "count", count);
   }

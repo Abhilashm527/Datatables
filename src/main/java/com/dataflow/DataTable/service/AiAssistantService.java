@@ -1,6 +1,7 @@
 package com.dataflow.DataTable.service;
 
 import com.dataflow.DataTable.config.GeminiClient;
+import org.springframework.data.domain.Pageable;
 import com.dataflow.DataTable.model.DataTableSchema;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -20,18 +21,20 @@ public class AiAssistantService {
     private final RecordService recordService;
     private final ObjectMapper objectMapper;
 
-    public AiAssistantService(GeminiClient geminiClient, DataTableService dataTableService, RecordService recordService) {
+    public AiAssistantService(GeminiClient geminiClient, DataTableService dataTableService,
+            RecordService recordService) {
         this.geminiClient = geminiClient;
         this.dataTableService = dataTableService;
         this.recordService = recordService;
         this.objectMapper = new ObjectMapper();
     }
 
-    public Map<String, Object> processPrompt(String userPrompt) {
+    public Map<String, Object> processPrompt(String userPrompt, String applicationId) {
         String aiResponse = null;
         try {
             // Build the system prompt with API documentation
-            String systemPrompt = buildSystemPrompt();
+            String systemPrompt = buildSystemPrompt()
+                    + (applicationId != null ? "\nCURRENT APPLICATION ID: " + applicationId : "");
             String fullPrompt = systemPrompt + "\n\nUser Request: " + userPrompt;
 
             // Get AI response
@@ -43,6 +46,15 @@ public class AiAssistantService {
 
             // Parse the AI response to extract action and parameters
             Map<String, Object> parsedResponse = parseAiResponse(aiResponse);
+
+            // Inject applicationId into parameters if present
+            if (applicationId != null) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> parameters = (Map<String, Object>) parsedResponse.get("parameters");
+                if (parameters != null) {
+                    parameters.put("applicationId", applicationId);
+                }
+            }
 
             // Execute the action
             Object result = executeAction(parsedResponse);
@@ -278,13 +290,15 @@ public class AiAssistantService {
                 throw new RuntimeException("AI response missing 'action' field. Response: " + cleanedResponse);
             }
 
-            if (!jsonNode.has("parameters") || jsonNode.get("parameters") == null) {
-                throw new RuntimeException("AI response missing 'parameters' field. Response: " + cleanedResponse);
-            }
-
             Map<String, Object> result = new HashMap<>();
             result.put("action", jsonNode.get("action").asText());
-            result.put("parameters", objectMapper.convertValue(jsonNode.get("parameters"), Map.class));
+
+            if (jsonNode.has("parameters") && jsonNode.get("parameters").isObject()) {
+                result.put("parameters", objectMapper.convertValue(jsonNode.get("parameters"), Map.class));
+            } else {
+                result.put("parameters", new HashMap<String, Object>());
+            }
+
             result.put("explanation", jsonNode.has("explanation") && jsonNode.get("explanation") != null
                     ? jsonNode.get("explanation").asText()
                     : "");
@@ -299,10 +313,11 @@ public class AiAssistantService {
     private Object executeAction(Map<String, Object> parsedResponse) {
         String action = (String) parsedResponse.get("action");
         Map<String, Object> parameters = (Map<String, Object>) parsedResponse.get("parameters");
+        String applicationId = (String) parameters.get("applicationId");
 
         return switch (action) {
             case "CREATE_TABLE" -> createTable(parameters);
-            case "LIST_TABLES" -> listTables();
+            case "LIST_TABLES" -> listTables(applicationId);
             case "GET_TABLE" -> getTable(parameters);
             case "DELETE_TABLE" -> deleteTable(parameters);
             case "INSERT_RECORD" -> insertRecord(parameters);
@@ -319,27 +334,54 @@ public class AiAssistantService {
         };
     }
 
-    // Helper method to resolve table name to ID
-    private String resolveTableId(String tableNameOrId) {
+    // Resolves tableName from params (for record operations)
+    private String resolveTableNameFromParams(Map<String, Object> parameters) {
+        String tableName = (String) parameters.get("tableName");
+        if (tableName != null)
+            return tableName;
+        String tableId = (String) parameters.get("tableId");
+        if (tableId != null) {
+            return dataTableService.getTableById(tableId)
+                    .map(t -> t.getTableName())
+                    .orElseThrow(() -> new RuntimeException("Table not found with id: " + tableId));
+        }
+        throw new RuntimeException("tableName or tableId is required");
+    }
+
+    // Resolves tableId from name (for schema operations like delete/update)
+    private String resolveTableIdFromParams(Map<String, Object> parameters) {
+        String tableId = (String) parameters.get("tableId");
+        if (tableId != null)
+            return tableId;
+        String tableName = (String) parameters.get("tableName");
+        String applicationId = (String) parameters.get("applicationId");
+        if (tableName != null)
+            return resolveTableId(tableName, applicationId);
+        throw new RuntimeException("tableId or tableName is required");
+    }
+
+    private String resolveTableId(String tableNameOrId, String applicationId) {
         // First try to get by ID
         var tableById = dataTableService.getTableById(tableNameOrId);
         if (tableById.isPresent()) {
             return tableById.get().getId();
         }
 
-        // Then try by name
-        var tableByName = dataTableService.getTableByName(tableNameOrId);
+        // Then try by name with application scope
+        var tableByName = dataTableService.getTableByName(tableNameOrId, applicationId);
         if (tableByName.isPresent()) {
             return tableByName.get().getId();
         }
 
-        throw new RuntimeException("Table not found: " + tableNameOrId);
+        throw new RuntimeException("Table not found: " + tableNameOrId
+                + (applicationId != null ? " in application " + applicationId : ""));
     }
 
     @SuppressWarnings("unchecked")
     private Object createTable(Map<String, Object> parameters) {
         try {
             DataTableSchema schema = new DataTableSchema();
+            schema.setApplicationId((String) parameters.get("applicationId"));
             schema.setTableName((String) parameters.get("tableName"));
             schema.setDescription((String) parameters.get("description"));
 
@@ -372,9 +414,14 @@ public class AiAssistantService {
         }
     }
 
-    private Object listTables() {
+    private Object listTables(String applicationId) {
         try {
-            var tables = dataTableService.getAllTables();
+            List<DataTableSchema> tables;
+            if (applicationId != null) {
+                tables = dataTableService.getTablesByApplicationId(applicationId);
+            } else {
+                tables = dataTableService.getAllTables();
+            }
             return Map.of(
                     "success", true,
                     "count", tables.size(),
@@ -387,7 +434,8 @@ public class AiAssistantService {
     private Object getTable(Map<String, Object> parameters) {
         try {
             String tableName = (String) parameters.get("tableName");
-            String tableId = resolveTableId(tableName);
+            String applicationId = (String) parameters.get("applicationId");
+            String tableId = resolveTableId(tableName, applicationId);
             var table = dataTableService.getTableById(tableId);
 
             if (table.isPresent()) {
@@ -405,7 +453,8 @@ public class AiAssistantService {
     private Object deleteTable(Map<String, Object> parameters) {
         try {
             String tableName = (String) parameters.get("tableName");
-            String tableId = resolveTableId(tableName);
+            String applicationId = (String) parameters.get("applicationId");
+            String tableId = resolveTableId(tableName, applicationId);
             dataTableService.deleteTable(tableId);
             return Map.of(
                     "success", true,
@@ -418,15 +467,10 @@ public class AiAssistantService {
     @SuppressWarnings("unchecked")
     private Object insertRecord(Map<String, Object> parameters) {
         try {
-            String tableName = (String) parameters.get("tableName");
-            String tableId = resolveTableId(tableName);
+            String tableName = resolveTableNameFromParams(parameters);
             Map<String, Object> data = (Map<String, Object>) parameters.get("data");
-
-            var record = recordService.insertRecord(tableId, data);
-            return Map.of(
-                    "success", true,
-                    "recordId", record.getId(),
-                    "message", "Record inserted successfully");
+            var record = recordService.insertRecord(tableName, data);
+            return Map.of("success", true, "recordId", record.get("_id"), "message", "Record inserted successfully");
         } catch (Exception e) {
             return Map.of("success", false, "error", e.getMessage());
         }
@@ -434,16 +478,11 @@ public class AiAssistantService {
 
     private Object getRecord(Map<String, Object> parameters) {
         try {
+            String tableName = resolveTableNameFromParams(parameters);
             String recordId = (String) parameters.get("recordId");
-            var record = recordService.getRecord(recordId);
-
-            if (record.isPresent()) {
-                return Map.of(
-                        "success", true,
-                        "record", record.get());
-            } else {
-                return Map.of("success", false, "error", "Record not found");
-            }
+            var record = recordService.getRecord(tableName, recordId);
+            return record.map(r -> Map.of("success", true, "record", r))
+                    .orElse(Map.of("success", false, "error", "Record not found"));
         } catch (Exception e) {
             return Map.of("success", false, "error", e.getMessage());
         }
@@ -452,14 +491,12 @@ public class AiAssistantService {
     @SuppressWarnings("unchecked")
     private Object updateRecord(Map<String, Object> parameters) {
         try {
+            String tableName = resolveTableNameFromParams(parameters);
             String recordId = (String) parameters.get("recordId");
             Map<String, Object> data = (Map<String, Object>) parameters.get("data");
-
-            var updatedRecord = recordService.updateRecord(recordId, data);
-            return Map.of(
-                    "success", true,
-                    "recordId", updatedRecord.getId(),
-                    "message", "Record updated successfully");
+            var updatedRecord = recordService.updateRecord(tableName, recordId, data);
+            return Map.of("success", true, "recordId", updatedRecord.get("_id"), "message",
+                    "Record updated successfully");
         } catch (Exception e) {
             return Map.of("success", false, "error", e.getMessage());
         }
@@ -467,11 +504,10 @@ public class AiAssistantService {
 
     private Object deleteRecord(Map<String, Object> parameters) {
         try {
+            String tableName = resolveTableNameFromParams(parameters);
             String recordId = (String) parameters.get("recordId");
-            recordService.deleteRecord(recordId);
-            return Map.of(
-                    "success", true,
-                    "message", "Record deleted successfully");
+            recordService.deleteRecord(tableName, recordId);
+            return Map.of("success", true, "message", "Record deleted successfully");
         } catch (Exception e) {
             return Map.of("success", false, "error", e.getMessage());
         }
@@ -479,15 +515,10 @@ public class AiAssistantService {
 
     private Object searchRecords(Map<String, Object> parameters) {
         try {
-            String tableName = (String) parameters.get("tableName");
-            String tableId = resolveTableId(tableName);
+            String tableName = resolveTableNameFromParams(parameters);
             String query = (String) parameters.get("query");
-
-            var records = recordService.searchRecords(tableId, query);
-            return Map.of(
-                    "success", true,
-                    "count", records.size(),
-                    "records", records);
+            var records = recordService.searchRecordsByText(tableName, query, Pageable.unpaged()).getContent();
+            return Map.of("success", true, "count", records.size(), "records", records);
         } catch (Exception e) {
             return Map.of("success", false, "error", e.getMessage());
         }
@@ -495,16 +526,11 @@ public class AiAssistantService {
 
     private Object searchByField(Map<String, Object> parameters) {
         try {
-            String tableName = (String) parameters.get("tableName");
-            String tableId = resolveTableId(tableName);
+            String tableName = resolveTableNameFromParams(parameters);
             String field = (String) parameters.get("field");
             Object value = parameters.get("value");
-
-            var records = recordService.searchRecords(tableId, field, value);
-            return Map.of(
-                    "success", true,
-                    "count", records.size(),
-                    "records", records);
+            var records = recordService.searchRecords(tableName, field, value);
+            return Map.of("success", true, "count", records.size(), "records", records);
         } catch (Exception e) {
             return Map.of("success", false, "error", e.getMessage());
         }
@@ -513,7 +539,8 @@ public class AiAssistantService {
     private Object createIndex(Map<String, Object> parameters) {
         try {
             String tableName = (String) parameters.get("tableName");
-            String tableId = resolveTableId(tableName);
+            String applicationId = (String) parameters.get("applicationId");
+            String tableId = resolveTableId(tableName, applicationId);
             String columnName = (String) parameters.get("columnName");
             boolean unique = parameters.containsKey("unique") ? (Boolean) parameters.get("unique") : false;
 
@@ -530,7 +557,8 @@ public class AiAssistantService {
     private Object dropIndex(Map<String, Object> parameters) {
         try {
             String tableName = (String) parameters.get("tableName");
-            String tableId = resolveTableId(tableName);
+            String applicationId = (String) parameters.get("applicationId");
+            String tableId = resolveTableId(tableName, applicationId);
             String columnName = (String) parameters.get("columnName");
 
             String indexName = dataTableService.dropIndex(tableId, columnName);
@@ -546,8 +574,9 @@ public class AiAssistantService {
     @SuppressWarnings("unchecked")
     private Object deleteRecords(Map<String, Object> parameters) {
         try {
+            String tableId = resolveTableIdFromParams(parameters);
             List<String> recordIds = (List<String>) parameters.get("recordIds");
-            recordService.deleteRecords(recordIds);
+            recordService.deleteRecords(tableId, recordIds);
             return Map.of(
                     "success", true,
                     "deletedCount", recordIds.size(),
@@ -560,7 +589,8 @@ public class AiAssistantService {
     private Object getRecordCount(Map<String, Object> parameters) {
         try {
             String tableName = (String) parameters.get("tableName");
-            String tableId = resolveTableId(tableName);
+            String applicationId = (String) parameters.get("applicationId");
+            String tableId = resolveTableId(tableName, applicationId);
 
             long count = recordService.getRecordCount(tableId);
             return Map.of(

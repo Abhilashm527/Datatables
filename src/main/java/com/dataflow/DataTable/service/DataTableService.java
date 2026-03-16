@@ -1,6 +1,5 @@
 package com.dataflow.DataTable.service;
 
-import com.dataflow.DataTable.model.DataTableRecord;
 import com.dataflow.DataTable.model.DataTableSchema;
 import com.dataflow.DataTable.repository.DataTableSchemaRepository;
 import com.dataflow.DataTable.util.DateUtils;
@@ -8,14 +7,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.index.Index;
-import org.springframework.data.mongodb.core.index.PartialIndexFilter;
-import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import jakarta.servlet.http.HttpServletRequest;
+
+import com.mongodb.MongoNamespace;
 
 import java.util.*;
 
@@ -30,9 +29,6 @@ public class DataTableService {
 
     @Autowired
     private ApplicationValidationService validationService;
-
-    @Autowired
-    private RecordService recordService;
 
     private String getBearerTokenFromContext() {
         try {
@@ -65,12 +61,7 @@ public class DataTableService {
         // Validate schema
         validateSchema(schema);
 
-        // Set audit metadata
-        long now = DateUtils.getUnixTimestampInUTC();
-        schema.setCreatedAt(now);
-        schema.setCreatedBy("admin");
-        schema.setUpdatedAt(now);
-        schema.setUpdatedBy("admin");
+        // (audit metadata handled by AuditMetaData if present)
 
         DataTableSchema savedSchema = schemaRepository.save(schema);
         createIndexes(savedSchema);
@@ -89,6 +80,13 @@ public class DataTableService {
         return schemaRepository.findByTableName(tableName);
     }
 
+    public Optional<DataTableSchema> getTableByName(String tableName, String applicationId) {
+        if (applicationId == null) {
+            return getTableByName(tableName);
+        }
+        return schemaRepository.findByTableNameAndApplicationId(tableName, applicationId);
+    }
+
     public Optional<DataTableSchema> getTableById(String id) {
         return schemaRepository.findById(id);
     }
@@ -100,11 +98,25 @@ public class DataTableService {
         }
 
         DataTableSchema schema = existingSchema.get();
+        String oldTableName = schema.getTableName();
+        String newTableName = updatedSchema.getTableName();
+
+        if (newTableName != null && !newTableName.equals(oldTableName)) {
+            if (schemaRepository.existsByTableName(newTableName)) {
+                throw new RuntimeException("Table with name '" + newTableName + "' already exists");
+            }
+            String oldCollectionName = RecordService.toCollectionName(oldTableName);
+            String newCollectionName = RecordService.toCollectionName(newTableName);
+            if (mongoTemplate.collectionExists(oldCollectionName)) {
+                mongoTemplate.getDb().getCollection(oldCollectionName)
+                        .renameCollection(new MongoNamespace(mongoTemplate.getDb().getName(), newCollectionName));
+            }
+            schema.setTableName(newTableName);
+        }
+
         schema.setDescription(updatedSchema.getDescription());
         schema.setColumns(updatedSchema.getColumns());
         schema.setMetadata(updatedSchema.getMetadata());
-        schema.setUpdatedAt(DateUtils.getUnixTimestampInUTC());
-        schema.setUpdatedBy("admin");
 
         validateSchema(schema);
 
@@ -120,8 +132,11 @@ public class DataTableService {
             throw new RuntimeException("Table not found with id: " + id);
         }
 
-        // Delete all records associated with this table
-        recordService.deleteRecordsByTableId(id);
+        // Drop the dedicated data collection for this table
+        String collectionName = RecordService.toCollectionName(schema.get().getTableName());
+        if (mongoTemplate.collectionExists(collectionName)) {
+            mongoTemplate.dropCollection(collectionName);
+        }
 
         // Delete the schema
         schemaRepository.deleteById(id);
@@ -173,7 +188,7 @@ public class DataTableService {
         }
 
         DataTableSchema schema = schemaOpt.get();
-        String fieldPath = "data." + columnName;
+        String fieldPath = columnName;
         String indexName = "idx_" + schema.getId() + "_" + columnName;
 
         // Check for exact column match
@@ -214,9 +229,8 @@ public class DataTableService {
             index.unique();
         }
 
-        index.partial(PartialIndexFilter.of(Criteria.where("tableId").is(schema.getId())));
-
-        mongoTemplate.indexOps(DataTableRecord.class).ensureIndex(index);
+        String collectionName = RecordService.toCollectionName(schema.getTableName());
+        mongoTemplate.indexOps(collectionName).ensureIndex(index);
         return indexName;
     }
 
@@ -235,7 +249,11 @@ public class DataTableService {
 
         String indexName = "idx_" + tableId + "_" + columnName;
         try {
-            mongoTemplate.indexOps(DataTableRecord.class).dropIndex(indexName);
+            Optional<DataTableSchema> schemaForDrop = schemaRepository.findById(tableId);
+            if (schemaForDrop.isPresent()) {
+                String collectionName = RecordService.toCollectionName(schemaForDrop.get().getTableName());
+                mongoTemplate.indexOps(collectionName).dropIndex(indexName);
+            }
             return indexName;
         } catch (Exception e) {
             return null;
@@ -252,11 +270,11 @@ public class DataTableService {
         if (schema.getColumns() == null)
             return;
 
+        String collectionName = RecordService.toCollectionName(schema.getTableName());
+
         for (DataTableSchema.ColumnDefinition column : schema.getColumns()) {
             if (column.isIndexed() || column.isUnique()) {
-                // Index 'data.columnName'
-                String fieldPath = "data." + column.getName();
-                // Name convention: idx_TABLEID_COLUMN
+                String fieldPath = column.getName();
                 String indexName = "idx_" + schema.getId() + "_" + column.getName();
 
                 Index index = new Index().on(fieldPath, Sort.Direction.ASC).named(indexName);
@@ -265,14 +283,10 @@ public class DataTableService {
                     index.unique();
                 }
 
-                // Partial Filter: { 'tableId': schemaId }
-                // This ensures the index only applies to records belonging to THIS table
-                index.partial(PartialIndexFilter.of(Criteria.where("tableId").is(schema.getId())));
-
+                // No partial filter needed — collection is already table-specific
                 try {
-                    mongoTemplate.indexOps(DataTableRecord.class).ensureIndex(index);
+                    mongoTemplate.indexOps(collectionName).ensureIndex(index);
                 } catch (Exception e) {
-                    // In production, log this.
                     System.err.println("Error creating index " + indexName + ": " + e.getMessage());
                 }
             }

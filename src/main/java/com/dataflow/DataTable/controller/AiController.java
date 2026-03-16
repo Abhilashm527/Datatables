@@ -47,13 +47,15 @@ public class AiController {
     @PostMapping("/ask")
     public Map<String, Object> ask(@RequestBody Map<String, String> req) {
         String prompt = req.get("prompt");
-        return aiAssistantService.processPrompt(prompt);
+        String applicationId = req.get("applicationId");
+        return aiAssistantService.processPrompt(prompt, applicationId);
     }
 
     @PostMapping("/chat")
     public Map<String, Object> chat(@RequestBody Map<String, String> req) {
         String prompt = req.get("prompt");
-        return conversationalAiService.processConversation(prompt);
+        String applicationId = req.get("applicationId");
+        return conversationalAiService.processConversation(prompt, applicationId);
     }
 
     /**
@@ -64,8 +66,9 @@ public class AiController {
         String prompt = req.get("prompt");
         String sessionId = req.getOrDefault("sessionId", UUID.randomUUID().toString());
         String userId = req.getOrDefault("userId", "default");
+        String applicationId = req.get("applicationId");
 
-        return memoryAwareAiService.processWithMemory(prompt, sessionId, userId);
+        return memoryAwareAiService.processWithMemory(prompt, sessionId, userId, applicationId);
     }
 
     /**

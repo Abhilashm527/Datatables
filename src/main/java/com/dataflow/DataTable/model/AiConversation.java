@@ -16,6 +16,7 @@ public class AiConversation {
 
     private String sessionId;
     private String userId; // Optional: for multi-user support
+    private String applicationId; // Current application context
     private LocalDateTime startedAt;
     private LocalDateTime lastUpdatedAt;
     private boolean active;
@@ -116,6 +117,14 @@ public class AiConversation {
 
     public void setUserId(String userId) {
         this.userId = userId;
+    }
+
+    public String getApplicationId() {
+        return applicationId;
+    }
+
+    public void setApplicationId(String applicationId) {
+        this.applicationId = applicationId;
     }
 
     public LocalDateTime getStartedAt() {

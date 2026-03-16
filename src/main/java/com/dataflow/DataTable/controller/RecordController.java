@@ -1,6 +1,5 @@
 package com.dataflow.DataTable.controller;
 
-import com.dataflow.DataTable.model.DataTableRecord;
 import com.dataflow.DataTable.service.RecordService;
 import com.dataflow.DataTable.util.Response;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,77 +25,81 @@ public class RecordController {
     @Autowired
     private RecordService recordService;
 
-    @PostMapping("/table/{tableId}")
+    @PostMapping("/{tableName}")
     public ResponseEntity<Response> insertRecord(
-            @PathVariable String tableId,
+            @PathVariable String tableName,
             @RequestBody Map<String, Object> data) {
         try {
-            DataTableRecord record = recordService.insertRecord(tableId, data);
-            return Response.createResponse(record);
+            return Response.createResponse(recordService.insertRecord(tableName, data));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Response.builder().code(400).message(e.getMessage()).build());
         }
     }
 
-    @PostMapping("/{tableId}/batch")
+    @PostMapping("/{tableName}/batch")
     public ResponseEntity<Response> insertRecords(
-            @PathVariable String tableId,
+            @PathVariable String tableName,
             @RequestBody List<Map<String, Object>> records) {
         try {
-            List<DataTableRecord> createdRecords = recordService.insertRecords(tableId, records);
-            return Response.createResponse(createdRecords);
+            return Response.createResponse(recordService.insertRecords(tableName, records));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Response.builder().code(400).message(e.getMessage()).build());
         }
     }
 
-    @GetMapping("/table/{tableId}")
+    @GetMapping("/{tableName}")
     public ResponseEntity<Response> getRecords(
-            @PathVariable String tableId,
+            @PathVariable String tableName,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
-            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "_id") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDir) {
 
         Sort.Direction direction = sortDir.equalsIgnoreCase("desc") ? Sort.Direction.DESC : Sort.Direction.ASC;
         Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortBy));
-
-        Page<DataTableRecord> records = recordService.getRecords(tableId, pageable);
+        Page<Map<String, Object>> records = recordService.getRecords(tableName, pageable);
         return Response.getResponse(records);
     }
 
-    @GetMapping("/{recordId}")
-    public ResponseEntity<Response> getRecord(@PathVariable String recordId) {
-        Optional<DataTableRecord> record = recordService.getRecord(recordId);
+    @GetMapping("/{tableName}/{recordId}")
+    public ResponseEntity<Response> getRecord(
+            @PathVariable String tableName,
+            @PathVariable String recordId) {
+        Optional<Map<String, Object>> record = recordService.getRecord(tableName, recordId);
         return record.map(Response::getResponse)
                 .orElse(ResponseEntity.status(HttpStatus.NOT_FOUND).body(Response.builder().code(404).message("Record not found").build()));
     }
 
-    @PutMapping("/{recordId}")
-    public ResponseEntity<Response> updateRecord(@PathVariable String recordId,
+    @PutMapping("/{tableName}/{recordId}")
+    public ResponseEntity<Response> updateRecord(
+            @PathVariable String tableName,
+            @PathVariable String recordId,
             @RequestBody Map<String, Object> data) {
         try {
-            DataTableRecord updatedRecord = recordService.updateRecord(recordId, data);
-            return Response.updateResponse(updatedRecord);
+            return Response.updateResponse(recordService.updateRecord(tableName, recordId, data));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Response.builder().code(400).message(e.getMessage()).build());
         }
     }
 
-    @DeleteMapping("/{recordId}")
-    public ResponseEntity<Response> deleteRecord(@PathVariable String recordId) {
+    @DeleteMapping("/{tableName}/{recordId}")
+    public ResponseEntity<Response> deleteRecord(
+            @PathVariable String tableName,
+            @PathVariable String recordId) {
         try {
-            recordService.deleteRecord(recordId);
+            recordService.deleteRecord(tableName, recordId);
             return ResponseEntity.status(HttpStatus.OK).body(Response.builder().code(200).message("Record deleted successfully").build());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Response.builder().code(404).message(e.getMessage()).build());
         }
     }
 
-    @DeleteMapping("/batch")
-    public ResponseEntity<Response> deleteRecords(@RequestBody List<String> recordIds) {
+    @DeleteMapping("/{tableName}/batch")
+    public ResponseEntity<Response> deleteRecords(
+            @PathVariable String tableName,
+            @RequestBody List<String> recordIds) {
         try {
-            recordService.deleteRecords(recordIds);
+            recordService.deleteRecords(tableName, recordIds);
             return ResponseEntity.status(HttpStatus.OK).body(Response.builder().code(200).message("Records deleted successfully").build());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -104,9 +107,22 @@ public class RecordController {
         }
     }
 
-    @GetMapping("/{tableId}/count")
-    public ResponseEntity<Response> getRecordCount(@PathVariable String tableId) {
-        long count = recordService.getRecordCount(tableId);
-        return Response.getResponse(Map.of("count", count));
+    @GetMapping("/{tableName}/search/text")
+    public ResponseEntity<Response> searchRecordsByText(
+            @PathVariable String tableName,
+            @RequestParam String query,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "_id") String sortBy,
+            @RequestParam(defaultValue = "desc") String sortDir) {
+
+        Sort.Direction direction = sortDir.equalsIgnoreCase("desc") ? Sort.Direction.DESC : Sort.Direction.ASC;
+        Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortBy));
+        return Response.getResponse(recordService.searchRecordsByText(tableName, query, pageable));
+    }
+
+    @GetMapping("/{tableName}/count")
+    public ResponseEntity<Response> getRecordCount(@PathVariable String tableName) {
+        return Response.getResponse(Map.of("count", recordService.getRecordCount(tableName)));
     }
 }

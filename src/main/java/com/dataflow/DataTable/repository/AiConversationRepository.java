@@ -14,5 +14,7 @@ public interface AiConversationRepository extends MongoRepository<AiConversation
 
     List<AiConversation> findByUserIdOrderByLastUpdatedAtDesc(String userId);
 
+    List<AiConversation> findByApplicationIdOrderByLastUpdatedAtDesc(String applicationId);
+
     List<AiConversation> findByActiveTrueOrderByLastUpdatedAtDesc();
 }

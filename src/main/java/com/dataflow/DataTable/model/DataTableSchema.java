@@ -6,7 +6,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 import java.util.List;
 import java.util.Map;
 
-@Document(collection = "data_table_schemas")
+@Document(collection = "datatable_schemas")
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class DataTableSchema extends AuditMetaData {
 
