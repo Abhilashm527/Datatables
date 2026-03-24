@@ -269,6 +269,7 @@ public class MemoryAwareAiService {
             - SEARCH_RECORDS, SEARCH_BY_FIELD
             - CREATE_INDEX, DROP_INDEX
             - GET_RECORD_COUNT
+            - CHAT (use this for greetings, general questions, or any non-database conversation)
 
             IMPORTANT INSTRUCTIONS:
             1. Use the database context above to understand what tables and data exist
@@ -308,12 +309,13 @@ public class MemoryAwareAiService {
     try {
       JsonNode jsonNode = objectMapper.readTree(cleanedResponse);
 
-      if (!jsonNode.has("action") || jsonNode.get("action") == null || jsonNode.get("action").isNull()) {
-        throw new RuntimeException("AI response missing 'action' field. Response: " + cleanedResponse);
-      }
-
       Map<String, Object> result = new HashMap<>();
-      result.put("action", jsonNode.get("action").asText());
+      if (!jsonNode.has("action") || jsonNode.get("action") == null || jsonNode.get("action").isNull()) {
+        // Treat as a conversational/chat response
+        result.put("action", "CHAT");
+      } else {
+        result.put("action", jsonNode.get("action").asText());
+      }
 
       if (jsonNode.has("parameters") && jsonNode.get("parameters").isObject()) {
         result.put("parameters", objectMapper.convertValue(jsonNode.get("parameters"), Map.class));
@@ -349,6 +351,7 @@ public class MemoryAwareAiService {
         case "CREATE_INDEX" -> createIndex(parameters);
         case "DROP_INDEX" -> dropIndex(parameters);
         case "GET_RECORD_COUNT" -> getRecordCount(parameters);
+        case "CHAT" -> Map.of("success", true, "message", "Conversational response");
         default -> Map.of("error", "Unknown action: " + action);
       };
     } catch (Exception e) {
